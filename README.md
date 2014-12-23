@@ -1,8 +1,7 @@
 processCallback.js
 ==================
 
-Callback-based messaging between Node.js (parent-child) processes
-
+An extremely light-weight and convenient way of communicating with forks/child-processes via callback-based messages.
 
 
 # Cluster code example
