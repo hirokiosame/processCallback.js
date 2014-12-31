@@ -9,6 +9,7 @@ module.exports = (function(){
 			callbacks = {},
 
 			publicMethods = {
+				"listeningTo": _process.process && _process.process.pid,
 				"send": function send(message, callback){
 
 					// Callback is necessary
