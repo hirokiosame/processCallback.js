@@ -2,63 +2,130 @@ module.exports = (function(){
 
 	'use strict';
 
-	return function(_process, masterCallback){
+	function processCallback(_process, masterCallback){
 
-		var	hash = Math.random().toString(36).substr(2, 5), // To uniquify every binding
-			id = 0, // To uniquify every callback
-			callbacks = {},
+		var self = this;
 
-			publicMethods = {
-				"listeningTo": _process.process && _process.process.pid,
-				"send": function send(message, callback){
+		// To uniquify every binding -- so a response to one binding doesn't get caught by another
+		this.hash = Math.random().toString(36).substr(2, 5);
 
-					// Callback is necessary
-					if( typeof callback !== "function" ){ throw new Error("Callback missing"); }
+		// To uniquify every callback
+		this.id = 0;
 
-					var hashId = hash + id++;
+		// Store Callbacks
+		this.callbacks = {};
 
-					// Store callback
-					callbacks[hashId] = callback;
+		// Store Events
+		this.events = {};
 
-					// Pass Message
-					_process.send({
-						"id": hashId,
-						"message": message
-					});
-				}
-			};
+		// Reference listening to
+		this.listeningTo = _process;
+
+		// Bind master callback
+		this.masterCallback = null;
+		this.recv(masterCallback);
 
 		// Bind Event to Process
 		_process.on("message", function(data){
 
 			// If not a valid message, dismiss
-			if(
-				typeof data !== "object" || data === null ||
-				typeof data.id !== "string" ||
-				!data.hasOwnProperty("message")
-			){ return; }
+			if( typeof data !== "object" || data === null ){ return; }
 
-			// If callback exists, it is in response to a message
-			if( typeof callbacks[data.id] === "function" ){
-
-				// Return to message
-				callbacks[data.id](data.message);
-
-				// Remove from memory
-				return callbacks[data.id] = null;
-			}
-
-			// If master callback has been defined, pass it in there
-			if( typeof masterCallback === "function" ){
-				masterCallback(data.message, function(message){
-					_process.send({
-						"id": data.id,
-						"message": message
-					})
+			// Event -- trigger events
+			if( data.hasOwnProperty("event") && self.events[data.event] ){
+				self.events[data.event].forEach(function(callback){
+					callback.apply(null, data.arguments);
 				});
 			}
+
+			// Direct message
+			if( data.hasOwnProperty("replyTo") ){
+
+				// Response -- trigger response callback
+				if( typeof self.callbacks[data.replyTo] === "function" ){
+
+					// Return to message
+					self.callbacks[data.replyTo](data.message);
+
+					// Remove from memory
+					self.callbacks[data.replyTo] = null;
+
+					return;
+				}
+
+				// Request - trigger master callback
+				if( self.masterCallback ){
+					self.masterCallback(data.message, function reply(message){
+						_process.send({
+							"replyTo": data.replyTo,
+							"message": message
+						})
+					});
+				}
+			}
+		});
+	}
+
+
+	// Direct message
+	
+	processCallback.prototype.send = function send(message, callback){
+
+		// Callback is necessary
+		if( typeof callback !== "function" ){ throw new Error("Callback missing"); }
+
+		var hashId = this.hash + this.id++;
+
+		// Store callback
+		this.callbacks[hashId] = callback;
+
+		// Make request
+		this.listeningTo.send({
+			"replyTo": hashId,
+			"message": message
 		});
 
-		return publicMethods;
+		return this;
+	};
+
+	processCallback.prototype.recv = function recv(masterCallback){
+
+		// Callback necessary
+		if( typeof masterCallback !== "function" ){ return false; }
+
+		// Store
+		this.masterCallback = masterCallback;
+
+		return this;
+	};
+
+
+	// Events emitter
+
+	processCallback.prototype.on = function(eventName, callback){
+
+		// Validate
+		if( typeof eventName !== "string" || typeof callback !== "function" ){ return; }
+
+		// Store
+		(this.events[eventName] || (this.events[eventName] = [])).push(callback);
+
+		return this;
+	};
+
+	processCallback.prototype.emit = function(eventName){
+
+		var args = Array.prototype.slice.call(arguments, 1);
+
+		this.listeningTo.send({
+			"event": eventName,
+			"arguments": args
+		});
+
+		return this;
+	};
+
+	return function(_process, masterCallback){
+		return new processCallback(_process, masterCallback);
 	};
 })();
